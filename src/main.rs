@@ -1,4 +1,5 @@
-//! Example of using blocking wifi.
+//! Example of using async wifi.
+//!
 //! Add your own ssid and password
 
 use core::convert::TryInto;
@@ -6,8 +7,10 @@ use core::convert::TryInto;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
 use esp_idf_svc::hal::prelude::Peripherals;
+use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::log::EspLogger;
-use esp_idf_svc::wifi::{BlockingWifi, EspWifi};
+use esp_idf_svc::timer::EspTaskTimerService;
+use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 
 use log::info;
@@ -21,14 +24,16 @@ fn main() -> anyhow::Result<()> {
 
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
+    let timer_service = EspTaskTimerService::new()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    let mut wifi = BlockingWifi::wrap(
+    let mut wifi = AsyncWifi::wrap(
         EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
         sys_loop,
+        timer_service,
     )?;
 
-    connect_wifi(&mut wifi)?;
+    block_on(connect_wifi(&mut wifi))?;
 
     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
 
@@ -41,7 +46,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()> {
+async fn connect_wifi(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<()> {
     let wifi_configuration: Configuration = Configuration::Client(ClientConfiguration {
         ssid: SSID.try_into().unwrap(),
         bssid: None,
@@ -53,13 +58,13 @@ fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()>
 
     wifi.set_configuration(&wifi_configuration)?;
 
-    wifi.start()?;
+    wifi.start().await?;
     info!("Wifi started");
 
-    wifi.connect()?;
+    wifi.connect().await?;
     info!("Wifi connected");
 
-    wifi.wait_netif_up()?;
+    wifi.wait_netif_up().await?;
     info!("Wifi netif up");
 
     Ok(())
